@@ -26,6 +26,10 @@ class _HomePageState extends State<HomePage> {
       titleTextController.text = existingTitle ?? '';
       contentTextController.text = existingNote ?? '';
       labelTextController.text = existingLabel ?? '';
+    } else {
+      titleTextController.clear();
+      contentTextController.clear();
+      labelTextController.clear();
     }
 
     showDialog(
@@ -37,17 +41,17 @@ class _HomePageState extends State<HomePage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                decoration: InputDecoration(labelText: "Title"),
+                decoration: const InputDecoration(labelText: "Title"),
                 controller: titleTextController,
               ),
               const SizedBox(height: 10),
               TextField(
-                decoration: InputDecoration(labelText: "Content"),
+                decoration: const InputDecoration(labelText: "Content"),
                 controller: contentTextController,
               ),
               const SizedBox(height: 10),
               TextField(
-                decoration: InputDecoration(labelText: "Label"),
+                decoration: const InputDecoration(labelText: "Label"),
                 controller: labelTextController,
               ),
             ],
@@ -87,18 +91,25 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("Notes")),
+      appBar: AppBar(title: const Text("Notes")),
       floatingActionButton: FloatingActionButton(
-        onPressed: openNoteBox,
+        onPressed: () => openNoteBox(),
         child: const Icon(Icons.add),
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: firestoreService.getNotes(),
         builder: (context, snapshot) {
           if (snapshot.hasData) {
-            List notesList = snapshot.data!.docs;
+            final notesList = snapshot.data!.docs;
 
-            return ListView.builder(
+            return GridView.builder(
+              padding: const EdgeInsets.all(10),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: 0.85,
+              ),
               itemCount: notesList.length,
               itemBuilder: (context, index) {
                 DocumentSnapshot document = notesList[index];
@@ -112,45 +123,63 @@ class _HomePageState extends State<HomePage> {
                 String label = data['label'] ?? "-";
                 Timestamp? tgl = data['tgl'];
 
-                return ListTile(
-                  title: Text(noteTitle),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(noteContent),
-                      Text("Label: $label"),
-                      Text(
-                        "Tanggal: ${tgl != null ? tgl.toDate() : '-'}",
-                      ),
-                    ],
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: Icon(Icons.edit),
-                        onPressed: () {
-                          openNoteBox(
-                            docId: docId,
-                            existingNote: noteContent,
-                            existingTitle: noteTitle,
-                            existingLabel: label,
-                          );
-                        },
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.delete),
-                        onPressed: () {
-                          firestoreService.deleteNote(docId);
-                        },
-                      ),
-                    ],
+                return Card(
+                  elevation: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          noteTitle,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          noteContent,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 5),
+                        Text("Label: $label"),
+                        Text(
+                          "Tanggal: ${tgl != null ? tgl.toDate() : '-'}",
+                          style: const TextStyle(fontSize: 10),
+                        ),
+                        const Spacer(),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit),
+                              onPressed: () {
+                                openNoteBox(
+                                  docId: docId,
+                                  existingNote: noteContent,
+                                  existingTitle: noteTitle,
+                                  existingLabel: label,
+                                );
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete),
+                              onPressed: () {
+                                firestoreService.deleteNote(docId);
+                              },
+                            ),
+                          ],
+                        )
+                      ],
+                    ),
                   ),
                 );
               },
             );
           } else {
-            return const Text("No data");
+            return const Center(child: Text("No data"));
           }
         },
       ),
