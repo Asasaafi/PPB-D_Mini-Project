@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
@@ -16,11 +17,14 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  await NotificationService.init();
+  // awesome_notifications tidak support Flutter Web — skip di Chrome
+  if (!kIsWeb) {
+    await NotificationService.init();
 
-  final isAllowed = await NotificationService.isPermissionAllowed();
-  if (!isAllowed) {
-    await NotificationService.requestPermission();
+    final isAllowed = await NotificationService.isPermissionAllowed();
+    if (!isAllowed) {
+      await NotificationService.requestPermission();
+    }
   }
 
   runApp(const MyApp());

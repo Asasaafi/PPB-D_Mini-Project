@@ -1,5 +1,6 @@
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/food_model.dart';
@@ -23,22 +24,22 @@ class _AddFoodScreenState extends State<AddFoodScreen>
 
   DateTime? _selectedDate;
   String? _selectedCategory;
-  File? _imageFile;
+  Uint8List? _imageBytes;
   bool _isLoading = false;
 
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
 
-  static const List<Map<String, String>> _categories = [
-    {'label': 'Fruit', 'emoji': '🍎'},
-    {'label': 'Vegetable', 'emoji': '🥦'},
-    {'label': 'Dairy', 'emoji': '🧀'},
-    {'label': 'Meat', 'emoji': '🥩'},
-    {'label': 'Seafood', 'emoji': '🐟'},
-    {'label': 'Beverage', 'emoji': '🥤'},
-    {'label': 'Snack', 'emoji': '🍪'},
-    {'label': 'Grain', 'emoji': '🌾'},
+  static const List<Map<String, dynamic>> _categories = [
+    {'label': 'Fruit',     'icon': Icons.apple_rounded,       'color': Color(0xFFE63946)},
+    {'label': 'Vegetable', 'icon': Icons.eco_rounded,         'color': Color(0xFF2D6A4F)},
+    {'label': 'Dairy',     'icon': Icons.water_drop_rounded,  'color': Color(0xFF4FC3F7)},
+    {'label': 'Meat',      'icon': Icons.set_meal_rounded,    'color': Color(0xFFBF5AF2)},
+    {'label': 'Seafood',   'icon': Icons.set_meal_rounded,    'color': Color(0xFF0077B6)},
+    {'label': 'Beverage',  'icon': Icons.local_drink_rounded, 'color': Color(0xFF00B4D8)},
+    {'label': 'Snack',     'icon': Icons.cookie_rounded,      'color': Color(0xFFF4A261)},
+    {'label': 'Grain',     'icon': Icons.grass_rounded,       'color': Color(0xFFD4A017)},
   ];
 
   @override
@@ -48,13 +49,11 @@ class _AddFoodScreenState extends State<AddFoodScreen>
       vsync: this,
       duration: const Duration(milliseconds: 700),
     );
-    _fadeAnim =
-        CurvedAnimation(parent: _animController, curve: Curves.easeOut);
+    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _slideAnim = Tween<Offset>(
       begin: const Offset(0, 0.1),
       end: Offset.zero,
-    ).animate(
-        CurvedAnimation(parent: _animController, curve: Curves.easeOut));
+    ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
     _animController.forward();
   }
 
@@ -97,21 +96,19 @@ class _AddFoodScreenState extends State<AddFoodScreen>
               ),
             ),
             const SizedBox(height: 20),
-
-            _SourceTile(
-              icon: Icons.camera_alt_rounded,
-              label: 'Take a Photo',
-              subtitle: 'Open camera',
-              color: const Color(0xFF2D6A4F),
-              onTap: () async {
-                Navigator.pop(context);
-                final file = await _storageService.pickFromCamera();
-                if (file != null) setState(() => _imageFile = file);
-              },
-            ),
-
-            const SizedBox(height: 12),
-
+            if (!kIsWeb)
+              _SourceTile(
+                icon: Icons.camera_alt_rounded,
+                label: 'Take a Photo',
+                subtitle: 'Open camera',
+                color: const Color(0xFF2D6A4F),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final bytes = await _storageService.pickBytesFromCamera();
+                  if (bytes != null) setState(() => _imageBytes = bytes);
+                },
+              ),
+            if (!kIsWeb) const SizedBox(height: 12),
             _SourceTile(
               icon: Icons.photo_library_rounded,
               label: 'Choose from Gallery',
@@ -119,12 +116,11 @@ class _AddFoodScreenState extends State<AddFoodScreen>
               color: const Color(0xFF52B788),
               onTap: () async {
                 Navigator.pop(context);
-                final file = await _storageService.pickFromGallery();
-                if (file != null) setState(() => _imageFile = file);
+                final bytes = await _storageService.pickBytesFromGallery();
+                if (bytes != null) setState(() => _imageBytes = bytes);
               },
             ),
-
-            if (_imageFile != null) ...[
+            if (_imageBytes != null) ...[
               const SizedBox(height: 12),
               _SourceTile(
                 icon: Icons.delete_outline_rounded,
@@ -133,7 +129,7 @@ class _AddFoodScreenState extends State<AddFoodScreen>
                 color: const Color(0xFFE63946),
                 onTap: () {
                   Navigator.pop(context);
-                  setState(() => _imageFile = null);
+                  setState(() => _imageBytes = null);
                 },
               ),
             ],
@@ -158,7 +154,7 @@ class _AddFoodScreenState extends State<AddFoodScreen>
               onPrimary: Colors.white,
               surface: Color(0xFFF7F4EF),
             ),
-            dialogBackgroundColor: const Color(0xFFF7F4EF),
+            dialogTheme: const DialogThemeData(backgroundColor: Color(0xFFF7F4EF)),
           ),
           child: child!,
         );
@@ -169,28 +165,18 @@ class _AddFoodScreenState extends State<AddFoodScreen>
 
   Future<void> _save() async {
     final name = _nameController.text.trim();
-
-    if (name.isEmpty) {
-      _showError('Please enter a food name.');
-      return;
-    }
-    if (_selectedDate == null) {
-      _showError('Please select an expiry date.');
-      return;
-    }
+    if (name.isEmpty) { _showError('Please enter a food name.'); return; }
+    if (_selectedDate == null) { _showError('Please select an expiry date.'); return; }
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      _showError('You must be logged in.');
-      return;
-    }
+    if (uid == null) { _showError('You must be logged in.'); return; }
 
     setState(() => _isLoading = true);
 
     try {
       String? imageUrl;
-      if (_imageFile != null) {
-        imageUrl = await _storageService.uploadFoodImage(_imageFile!);
+      if (_imageBytes != null) {
+        imageUrl = await _storageService.uploadFoodImageBytes(_imageBytes!);
       }
 
       final food = FoodModel(
@@ -198,20 +184,13 @@ class _AddFoodScreenState extends State<AddFoodScreen>
         name: name,
         expiryDate: _selectedDate!,
         imageUrl: imageUrl,
-        notes: _notesController.text.trim().isEmpty
-            ? null
-            : _notesController.text.trim(),
+        notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
         category: _selectedCategory,
         dateAdded: DateTime.now(),
         userId: uid,
       );
 
       await _firestoreService.addFood(food);
-
-      // Schedule notifikasi
-      // Note: food.id masih '' karena baru saja dibuat,
-      // idealnya Firestore service mengembalikan doc ID.
-      // Untuk sekarang kita skip dulu, atau bisa extend FirestoreService.
       await NotificationService.scheduleForFood(food);
 
       if (!mounted) return;
@@ -229,8 +208,7 @@ class _AddFoodScreenState extends State<AddFoodScreen>
         content: Text(msg),
         backgroundColor: const Color(0xFFE63946),
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
@@ -260,7 +238,7 @@ class _AddFoodScreenState extends State<AddFoodScreen>
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.06),
+                                color: Colors.black.withValues(alpha: 0.06),
                                 blurRadius: 8,
                                 offset: const Offset(0, 2),
                               ),
@@ -286,20 +264,16 @@ class _AddFoodScreenState extends State<AddFoodScreen>
                     ],
                   ),
                 ),
-
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-
                         _buildLabel('Food Photo'),
                         const SizedBox(height: 10),
                         _buildImagePicker(),
-
                         const SizedBox(height: 24),
-
                         _buildLabel('Food Name *'),
                         const SizedBox(height: 8),
                         _buildTextField(
@@ -307,63 +281,45 @@ class _AddFoodScreenState extends State<AddFoodScreen>
                           hint: 'e.g. Fresh Milk, Spinach...',
                           icon: Icons.fastfood_rounded,
                         ),
-
                         const SizedBox(height: 24),
-
                         _buildLabel('Category'),
                         const SizedBox(height: 12),
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
                           children: _categories.map((cat) {
-                            final isSelected =
-                                _selectedCategory == cat['label'];
+                            final isSelected = _selectedCategory == cat['label'];
+                            final color = cat['color'] as Color;
+                            final icon = cat['icon'] as IconData;
                             return GestureDetector(
                               onTap: () => setState(() {
-                                _selectedCategory =
-                                    isSelected ? null : cat['label'];
+                                _selectedCategory = isSelected ? null : cat['label'] as String;
                               }),
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 180),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 10),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                 decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? const Color(0xFF2D6A4F)
-                                      : Colors.white,
+                                  color: isSelected ? color : Colors.white,
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: isSelected
-                                        ? const Color(0xFF2D6A4F)
-                                        : Colors.grey.shade200,
+                                    color: isSelected ? color : Colors.grey.shade200,
                                     width: 1.5,
                                   ),
                                   boxShadow: isSelected
-                                      ? [
-                                          BoxShadow(
-                                            color: const Color(0xFF2D6A4F)
-                                                .withOpacity(0.25),
-                                            blurRadius: 8,
-                                            offset: const Offset(0, 3),
-                                          )
-                                        ]
+                                      ? [BoxShadow(color: color.withValues(alpha: 0.25), blurRadius: 8, offset: const Offset(0, 3))]
                                       : [],
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(cat['emoji']!,
-                                        style:
-                                            const TextStyle(fontSize: 16)),
+                                    Icon(icon, size: 16, color: isSelected ? Colors.white : color),
                                     const SizedBox(width: 6),
                                     Text(
-                                      cat['label']!,
+                                      cat['label'] as String,
                                       style: TextStyle(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w600,
-                                        color: isSelected
-                                            ? Colors.white
-                                            : const Color(0xFF1B2E22),
+                                        color: isSelected ? Colors.white : const Color(0xFF1B2E22),
                                       ),
                                     ),
                                   ],
@@ -372,94 +328,61 @@ class _AddFoodScreenState extends State<AddFoodScreen>
                             );
                           }).toList(),
                         ),
-
                         const SizedBox(height: 24),
-
                         _buildLabel('Expiry Date *'),
                         const SizedBox(height: 8),
                         GestureDetector(
                           onTap: _pickDate,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 16),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(14),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
+                              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 2))],
                             ),
                             child: Row(
                               children: [
-                                const Icon(
-                                  Icons.calendar_today_rounded,
-                                  color: Color(0xFF2D6A4F),
-                                  size: 20,
-                                ),
+                                const Icon(Icons.calendar_today_rounded, color: Color(0xFF2D6A4F), size: 20),
                                 const SizedBox(width: 12),
                                 Text(
                                   _selectedDate == null
                                       ? 'Select expiry date'
-                                      : DateFormat('EEEE, d MMMM yyyy')
-                                          .format(_selectedDate!),
+                                      : DateFormat('EEEE, d MMMM yyyy').format(_selectedDate!),
                                   style: TextStyle(
                                     fontSize: 15,
-                                    color: _selectedDate == null
-                                        ? Colors.grey.shade400
-                                        : const Color(0xFF1B2E22),
-                                    fontWeight: _selectedDate == null
-                                        ? FontWeight.w400
-                                        : FontWeight.w600,
+                                    color: _selectedDate == null ? Colors.grey.shade400 : const Color(0xFF1B2E22),
+                                    fontWeight: _selectedDate == null ? FontWeight.w400 : FontWeight.w600,
                                   ),
                                 ),
                                 const Spacer(),
-                                Icon(Icons.chevron_right_rounded,
-                                    color: Colors.grey.shade400),
+                                Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
                               ],
                             ),
                           ),
                         ),
-
                         if (_selectedDate != null) ...[
                           const SizedBox(height: 8),
                           _DatePreviewChip(date: _selectedDate!),
                         ],
-
                         const SizedBox(height: 24),
-
                         _buildLabel('Notes (optional)'),
                         const SizedBox(height: 8),
                         Container(
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(14),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
+                            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 2))],
                           ),
                           child: TextField(
                             controller: _notesController,
                             maxLines: 3,
-                            style: const TextStyle(
-                                fontSize: 15, color: Color(0xFF1B2E22)),
+                            style: const TextStyle(fontSize: 15, color: Color(0xFF1B2E22)),
                             decoration: InputDecoration(
-                              hintText:
-                                  'Storage tips, quantity, brand...',
-                              hintStyle: TextStyle(
-                                  color: Colors.grey.shade400,
-                                  fontSize: 15),
+                              hintText: 'Storage tips, quantity, brand...',
+                              hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 15),
                               prefixIcon: const Padding(
                                 padding: EdgeInsets.only(bottom: 40),
-                                child: Icon(Icons.notes_rounded,
-                                    color: Color(0xFF2D6A4F), size: 20),
+                                child: Icon(Icons.notes_rounded, color: Color(0xFF2D6A4F), size: 20),
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
@@ -467,14 +390,11 @@ class _AddFoodScreenState extends State<AddFoodScreen>
                               ),
                               filled: true,
                               fillColor: Colors.white,
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 16),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                             ),
                           ),
                         ),
-
                         const SizedBox(height: 36),
-
                         SizedBox(
                           width: double.infinity,
                           height: 56,
@@ -483,41 +403,27 @@ class _AddFoodScreenState extends State<AddFoodScreen>
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF2D6A4F),
                               foregroundColor: Colors.white,
-                              disabledBackgroundColor:
-                                  const Color(0xFF2D6A4F).withOpacity(0.5),
+                              disabledBackgroundColor: const Color(0xFF2D6A4F).withValues(alpha: 0.5),
                               elevation: 0,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                             ),
                             child: _isLoading
                                 ? const SizedBox(
                                     width: 22,
                                     height: 22,
-                                    child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                      strokeWidth: 2.5,
-                                    ),
+                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
                                   )
                                 : const Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.center,
+                                    mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
                                       Icon(Icons.check_rounded, size: 20),
                                       SizedBox(width: 8),
-                                      Text(
-                                        'Save Food Item',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                          letterSpacing: 0.3,
-                                        ),
-                                      ),
+                                      Text('Save Food Item',
+                                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 0.3)),
                                     ],
                                   ),
                           ),
                         ),
-
                         const SizedBox(height: 16),
                       ],
                     ),
@@ -542,22 +448,12 @@ class _AddFoodScreenState extends State<AddFoodScreen>
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: _imageFile != null
-                ? const Color(0xFF2D6A4F)
-                : Colors.grey.shade200,
+            color: _imageBytes != null ? const Color(0xFF2D6A4F) : Colors.grey.shade200,
             width: 2,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 2))],
         ),
-        child: _imageFile != null
-            ? _buildImagePreview()
-            : _buildImagePlaceholder(),
+        child: _imageBytes != null ? _buildImagePreview() : _buildImagePlaceholder(),
       ),
     );
   }
@@ -568,8 +464,8 @@ class _AddFoodScreenState extends State<AddFoodScreen>
       children: [
         ClipRRect(
           borderRadius: BorderRadius.circular(14),
-          child: Image.file(
-            _imageFile!,
+          child: Image.memory(
+            _imageBytes!,
             fit: BoxFit.cover,
           ),
         ),
@@ -581,44 +477,28 @@ class _AddFoodScreenState extends State<AddFoodScreen>
             child: Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.55),
+                color: Colors.black.withValues(alpha: 0.55),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.edit_rounded,
-                color: Colors.white,
-                size: 16,
-              ),
+              child: const Icon(Icons.edit_rounded, color: Colors.white, size: 16),
             ),
           ),
         ),
         Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
+          bottom: 0, left: 0, right: 0,
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 8),
             decoration: BoxDecoration(
-              borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(14)),
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  Colors.black.withOpacity(0.45),
-                ],
+                colors: [Colors.transparent, Colors.black.withValues(alpha: 0.45)],
               ),
             ),
             child: const Center(
-              child: Text(
-                'Tap to change photo',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              child: Text('Tap to change photo',
+                  style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
             ),
           ),
         ),
@@ -637,29 +517,14 @@ class _AddFoodScreenState extends State<AddFoodScreen>
             color: const Color(0xFFE8F5EE),
             borderRadius: BorderRadius.circular(16),
           ),
-          child: const Icon(
-            Icons.add_a_photo_rounded,
-            size: 28,
-            color: Color(0xFF2D6A4F),
-          ),
+          child: const Icon(Icons.add_a_photo_rounded, size: 28, color: Color(0xFF2D6A4F)),
         ),
         const SizedBox(height: 12),
-        const Text(
-          'Add Photo',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF1B2E22),
-          ),
-        ),
+        const Text('Add Photo',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1B2E22))),
         const SizedBox(height: 4),
-        Text(
-          'Camera or Gallery',
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey.shade500,
-          ),
-        ),
+        Text(kIsWeb ? 'Choose from Gallery' : 'Camera or Gallery',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
       ],
     );
   }
@@ -667,12 +532,7 @@ class _AddFoodScreenState extends State<AddFoodScreen>
   Widget _buildLabel(String text) {
     return Text(
       text,
-      style: const TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        color: Color(0xFF1B2E22),
-        letterSpacing: 0.2,
-      ),
+      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1B2E22), letterSpacing: 0.2),
     );
   }
 
@@ -685,32 +545,19 @@ class _AddFoodScreenState extends State<AddFoodScreen>
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 2))],
       ),
       child: TextField(
         controller: controller,
-        style:
-            const TextStyle(fontSize: 15, color: Color(0xFF1B2E22)),
+        style: const TextStyle(fontSize: 15, color: Color(0xFF1B2E22)),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle:
-              TextStyle(color: Colors.grey.shade400, fontSize: 15),
-          prefixIcon:
-              Icon(icon, color: const Color(0xFF2D6A4F), size: 20),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
-          ),
+          hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 15),
+          prefixIcon: Icon(icon, color: const Color(0xFF2D6A4F), size: 20),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
           filled: true,
           fillColor: Colors.white,
-          contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16, vertical: 16),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         ),
       ),
     );
@@ -741,50 +588,28 @@ class _SourceTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2))],
         ),
         child: Row(
           children: [
             Container(
               width: 44,
               height: 44,
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
               child: Icon(icon, color: color, size: 22),
             ),
             const SizedBox(width: 14),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF1B2E22),
-                  ),
-                ),
+                Text(label,
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF1B2E22))),
                 const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey.shade500,
-                  ),
-                ),
+                Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
               ],
             ),
             const Spacer(),
-            Icon(Icons.chevron_right_rounded,
-                color: Colors.grey.shade300, size: 20),
+            Icon(Icons.chevron_right_rounded, color: Colors.grey.shade300, size: 20),
           ],
         ),
       ),
@@ -828,23 +653,16 @@ class _DatePreviewChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: color, size: 14),
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: color,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600)),
         ],
       ),
     );

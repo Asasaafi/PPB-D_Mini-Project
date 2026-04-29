@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../models/food_model.dart';
 
@@ -92,8 +93,8 @@ class FoodCard extends StatelessWidget {
               child: Stack(
                 children: [
                   food.imageUrl != null && food.imageUrl!.isNotEmpty
-                      ? Image.network(
-                          food.imageUrl!,
+                      ? Image.memory(
+                          base64Decode(food.imageUrl!.split(',').last),
                           height: 110,
                           width: double.infinity,
                           fit: BoxFit.cover,

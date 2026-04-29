@@ -1,4 +1,6 @@
-import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/food_model.dart';
@@ -24,7 +26,7 @@ class _EditFoodScreenState extends State<EditFoodScreen>
   late DateTime _selectedDate;
   String? _selectedCategory;
 
-  File? _newImageFile;
+  Uint8List? _newImageBytes;
   String? _existingImageUrl;
   bool _removeExistingImage = false;
 
@@ -34,15 +36,15 @@ class _EditFoodScreenState extends State<EditFoodScreen>
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
 
-  static const List<Map<String, String>> _categories = [
-    {'label': 'Fruit', 'emoji': '🍎'},
-    {'label': 'Vegetable', 'emoji': '🥦'},
-    {'label': 'Dairy', 'emoji': '🧀'},
-    {'label': 'Meat', 'emoji': '🥩'},
-    {'label': 'Seafood', 'emoji': '🐟'},
-    {'label': 'Beverage', 'emoji': '🥤'},
-    {'label': 'Snack', 'emoji': '🍪'},
-    {'label': 'Grain', 'emoji': '🌾'},
+  static const List<Map<String, dynamic>> _categories = [
+    {'label': 'Fruit',     'icon': Icons.apple_rounded,       'color': Color(0xFFE63946)},
+    {'label': 'Vegetable', 'icon': Icons.eco_rounded,         'color': Color(0xFF2D6A4F)},
+    {'label': 'Dairy',     'icon': Icons.water_drop_rounded,  'color': Color(0xFF4FC3F7)},
+    {'label': 'Meat',      'icon': Icons.set_meal_rounded,    'color': Color(0xFFBF5AF2)},
+    {'label': 'Seafood',   'icon': Icons.set_meal_rounded,    'color': Color(0xFF0077B6)},
+    {'label': 'Beverage',  'icon': Icons.local_drink_rounded, 'color': Color(0xFF00B4D8)},
+    {'label': 'Snack',     'icon': Icons.cookie_rounded,      'color': Color(0xFFF4A261)},
+    {'label': 'Grain',     'icon': Icons.grass_rounded,       'color': Color(0xFFD4A017)},
   ];
 
   @override
@@ -58,13 +60,11 @@ class _EditFoodScreenState extends State<EditFoodScreen>
       vsync: this,
       duration: const Duration(milliseconds: 700),
     );
-    _fadeAnim =
-        CurvedAnimation(parent: _animController, curve: Curves.easeOut);
+    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _slideAnim = Tween<Offset>(
       begin: const Offset(0, 0.1),
       end: Offset.zero,
-    ).animate(
-        CurvedAnimation(parent: _animController, curve: Curves.easeOut));
+    ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
     _animController.forward();
   }
 
@@ -77,7 +77,7 @@ class _EditFoodScreenState extends State<EditFoodScreen>
   }
 
   bool get _hasPhoto =>
-      _newImageFile != null ||
+      _newImageBytes != null ||
       (_existingImageUrl != null && !_removeExistingImage);
 
   void _showImageSourceSheet() {
@@ -111,23 +111,24 @@ class _EditFoodScreenState extends State<EditFoodScreen>
               ),
             ),
             const SizedBox(height: 20),
-            _SourceTile(
-              icon: Icons.camera_alt_rounded,
-              label: 'Take a Photo',
-              subtitle: 'Open camera',
-              color: const Color(0xFF2D6A4F),
-              onTap: () async {
-                Navigator.pop(context);
-                final file = await _storageService.pickFromCamera();
-                if (file != null) {
-                  setState(() {
-                    _newImageFile = file;
-                    _removeExistingImage = false;
-                  });
-                }
-              },
-            ),
-            const SizedBox(height: 12),
+            if (!kIsWeb)
+              _SourceTile(
+                icon: Icons.camera_alt_rounded,
+                label: 'Take a Photo',
+                subtitle: 'Open camera',
+                color: const Color(0xFF2D6A4F),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final bytes = await _storageService.pickBytesFromCamera();
+                  if (bytes != null) {
+                    setState(() {
+                      _newImageBytes = bytes;
+                      _removeExistingImage = false;
+                    });
+                  }
+                },
+              ),
+            if (!kIsWeb) const SizedBox(height: 12),
             _SourceTile(
               icon: Icons.photo_library_rounded,
               label: 'Choose from Gallery',
@@ -135,10 +136,10 @@ class _EditFoodScreenState extends State<EditFoodScreen>
               color: const Color(0xFF52B788),
               onTap: () async {
                 Navigator.pop(context);
-                final file = await _storageService.pickFromGallery();
-                if (file != null) {
+                final bytes = await _storageService.pickBytesFromGallery();
+                if (bytes != null) {
                   setState(() {
-                    _newImageFile = file;
+                    _newImageBytes = bytes;
                     _removeExistingImage = false;
                   });
                 }
@@ -154,7 +155,7 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                 onTap: () {
                   Navigator.pop(context);
                   setState(() {
-                    _newImageFile = null;
+                    _newImageBytes = null;
                     _removeExistingImage = true;
                   });
                 },
@@ -180,7 +181,9 @@ class _EditFoodScreenState extends State<EditFoodScreen>
             onPrimary: Colors.white,
             surface: Color(0xFFF7F4EF),
           ),
-          dialogBackgroundColor: const Color(0xFFF7F4EF),
+          dialogTheme: const DialogThemeData(
+            backgroundColor: Color(0xFFF7F4EF),
+          ),
         ),
         child: child!,
       ),
@@ -200,17 +203,13 @@ class _EditFoodScreenState extends State<EditFoodScreen>
     try {
       String? imageUrl = _existingImageUrl;
 
-      if (_removeExistingImage && _existingImageUrl != null) {
-        await _storageService.deleteImage(_existingImageUrl!);
+      if (_removeExistingImage) {
         imageUrl = null;
       }
 
-      if (_newImageFile != null) {
-        if (_existingImageUrl != null && !_removeExistingImage) {
-          await _storageService.deleteImage(_existingImageUrl!);
-        }
-        imageUrl = await _storageService.uploadFoodImage(
-          _newImageFile!,
+      if (_newImageBytes != null) {
+        imageUrl = await _storageService.uploadFoodImageBytes(
+          _newImageBytes!,
           foodId: widget.food.id,
         );
       }
@@ -226,7 +225,6 @@ class _EditFoodScreenState extends State<EditFoodScreen>
       );
 
       await _firestoreService.updateFood(updatedFood);
-
       await NotificationService.cancelForFood(widget.food);
       await NotificationService.scheduleForFood(updatedFood);
 
@@ -245,8 +243,7 @@ class _EditFoodScreenState extends State<EditFoodScreen>
         content: Text(msg),
         backgroundColor: const Color(0xFFE63946),
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
@@ -276,7 +273,7 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.06),
+                                color: Colors.black.withValues(alpha: 0.06),
                                 blurRadius: 8,
                                 offset: const Offset(0, 2),
                               ),
@@ -302,20 +299,16 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                     ],
                   ),
                 ),
-
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-
                         _buildLabel('Food Photo'),
                         const SizedBox(height: 10),
                         _buildImagePicker(),
-
                         const SizedBox(height: 24),
-
                         _buildLabel('Food Name *'),
                         const SizedBox(height: 8),
                         _buildTextField(
@@ -323,57 +316,44 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                           hint: 'e.g. Fresh Milk, Spinach...',
                           icon: Icons.fastfood_rounded,
                         ),
-
                         const SizedBox(height: 24),
-
                         _buildLabel('Category'),
                         const SizedBox(height: 12),
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
                           children: _categories.map((cat) {
-                            final isSelected =
-                                _selectedCategory == cat['label'];
+                            final isSelected = _selectedCategory == cat['label'];
+                            final color = cat['color'] as Color;
+                            final icon = cat['icon'] as IconData;
                             return GestureDetector(
                               onTap: () => setState(() {
                                 _selectedCategory =
-                                    isSelected ? null : cat['label'];
+                                    isSelected ? null : cat['label'] as String;
                               }),
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 180),
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 14, vertical: 10),
                                 decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? const Color(0xFF2D6A4F)
-                                      : Colors.white,
+                                  color: isSelected ? color : Colors.white,
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: isSelected
-                                        ? const Color(0xFF2D6A4F)
-                                        : Colors.grey.shade200,
+                                    color: isSelected ? color : Colors.grey.shade200,
                                     width: 1.5,
                                   ),
                                   boxShadow: isSelected
-                                      ? [
-                                          BoxShadow(
-                                            color: const Color(0xFF2D6A4F)
-                                                .withOpacity(0.25),
-                                            blurRadius: 8,
-                                            offset: const Offset(0, 3),
-                                          )
-                                        ]
+                                      ? [BoxShadow(color: color.withValues(alpha: 0.25), blurRadius: 8, offset: const Offset(0, 3))]
                                       : [],
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(cat['emoji']!,
-                                        style:
-                                            const TextStyle(fontSize: 16)),
+                                    Icon(icon, size: 16,
+                                        color: isSelected ? Colors.white : color),
                                     const SizedBox(width: 6),
                                     Text(
-                                      cat['label']!,
+                                      cat['label'] as String,
                                       style: TextStyle(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w600,
@@ -388,9 +368,7 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                             );
                           }).toList(),
                         ),
-
                         const SizedBox(height: 24),
-
                         _buildLabel('Expiry Date *'),
                         const SizedBox(height: 8),
                         GestureDetector(
@@ -403,7 +381,7 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                               borderRadius: BorderRadius.circular(14),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
+                                  color: Colors.black.withValues(alpha: 0.05),
                                   blurRadius: 10,
                                   offset: const Offset(0, 2),
                                 ),
@@ -411,15 +389,11 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                             ),
                             child: Row(
                               children: [
-                                const Icon(
-                                  Icons.calendar_today_rounded,
-                                  color: Color(0xFF2D6A4F),
-                                  size: 20,
-                                ),
+                                const Icon(Icons.calendar_today_rounded,
+                                    color: Color(0xFF2D6A4F), size: 20),
                                 const SizedBox(width: 12),
                                 Text(
-                                  DateFormat('EEEE, d MMMM yyyy')
-                                      .format(_selectedDate),
+                                  DateFormat('EEEE, d MMMM yyyy').format(_selectedDate),
                                   style: const TextStyle(
                                     fontSize: 15,
                                     color: Color(0xFF1B2E22),
@@ -427,20 +401,15 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                                   ),
                                 ),
                                 const Spacer(),
-                                Icon(
-                                  Icons.chevron_right_rounded,
-                                  color: Colors.grey.shade400,
-                                ),
+                                Icon(Icons.chevron_right_rounded,
+                                    color: Colors.grey.shade400),
                               ],
                             ),
                           ),
                         ),
-
                         const SizedBox(height: 8),
                         _DatePreviewChip(date: _selectedDate),
-
                         const SizedBox(height: 24),
-
                         _buildLabel('Notes (optional)'),
                         const SizedBox(height: 8),
                         Container(
@@ -449,7 +418,7 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                             borderRadius: BorderRadius.circular(14),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
+                                color: Colors.black.withValues(alpha: 0.05),
                                 blurRadius: 10,
                                 offset: const Offset(0, 2),
                               ),
@@ -461,11 +430,9 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                             style: const TextStyle(
                                 fontSize: 15, color: Color(0xFF1B2E22)),
                             decoration: InputDecoration(
-                              hintText:
-                                  'Storage tips, quantity, brand...',
+                              hintText: 'Storage tips, quantity, brand...',
                               hintStyle: TextStyle(
-                                  color: Colors.grey.shade400,
-                                  fontSize: 15),
+                                  color: Colors.grey.shade400, fontSize: 15),
                               prefixIcon: const Padding(
                                 padding: EdgeInsets.only(bottom: 40),
                                 child: Icon(Icons.notes_rounded,
@@ -482,9 +449,7 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                             ),
                           ),
                         ),
-
                         const SizedBox(height: 36),
-
                         SizedBox(
                           width: double.infinity,
                           height: 56,
@@ -494,40 +459,32 @@ class _EditFoodScreenState extends State<EditFoodScreen>
                               backgroundColor: const Color(0xFF2D6A4F),
                               foregroundColor: Colors.white,
                               disabledBackgroundColor:
-                                  const Color(0xFF2D6A4F).withOpacity(0.5),
+                                  const Color(0xFF2D6A4F).withValues(alpha: 0.5),
                               elevation: 0,
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
+                                  borderRadius: BorderRadius.circular(16)),
                             ),
                             child: _isLoading
                                 ? const SizedBox(
                                     width: 22,
                                     height: 22,
                                     child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                      strokeWidth: 2.5,
-                                    ),
+                                        color: Colors.white, strokeWidth: 2.5),
                                   )
                                 : const Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.center,
+                                    mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
                                       Icon(Icons.save_rounded, size: 20),
                                       SizedBox(width: 8),
-                                      Text(
-                                        'Save Changes',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                          letterSpacing: 0.3,
-                                        ),
-                                      ),
+                                      Text('Save Changes',
+                                          style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                              letterSpacing: 0.3)),
                                     ],
                                   ),
                           ),
                         ),
-
                         const SizedBox(height: 16),
                       ],
                     ),
@@ -552,14 +509,12 @@ class _EditFoodScreenState extends State<EditFoodScreen>
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: _hasPhoto
-                ? const Color(0xFF2D6A4F)
-                : Colors.grey.shade200,
+            color: _hasPhoto ? const Color(0xFF2D6A4F) : Colors.grey.shade200,
             width: 2,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 10,
               offset: const Offset(0, 2),
             ),
@@ -571,19 +526,26 @@ class _EditFoodScreenState extends State<EditFoodScreen>
   }
 
   Widget _buildImagePreview() {
-    final isLocal = _newImageFile != null;
+    Widget imageWidget;
+
+    if (_newImageBytes != null) {
+      imageWidget = Image.memory(_newImageBytes!, fit: BoxFit.cover);
+    } else if (_existingImageUrl != null && _existingImageUrl!.startsWith('data:')) {
+      imageWidget = Image.memory(
+        base64Decode(_existingImageUrl!.split(',').last),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _buildImagePlaceholder(),
+      );
+    } else {
+      imageWidget = _buildImagePlaceholder();
+    }
+
     return Stack(
       fit: StackFit.expand,
       children: [
         ClipRRect(
           borderRadius: BorderRadius.circular(14),
-          child: isLocal
-              ? Image.file(_newImageFile!, fit: BoxFit.cover)
-              : Image.network(
-                  _existingImageUrl!,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => _buildImagePlaceholder(),
-                ),
+          child: imageWidget,
         ),
         Positioned(
           top: 8,
@@ -591,40 +553,33 @@ class _EditFoodScreenState extends State<EditFoodScreen>
           child: Container(
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.55),
+              color: Colors.black.withValues(alpha: 0.55),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.edit_rounded,
-                color: Colors.white, size: 16),
+            child: const Icon(Icons.edit_rounded, color: Colors.white, size: 16),
           ),
         ),
         Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
+          bottom: 0, left: 0, right: 0,
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 8),
             decoration: BoxDecoration(
-              borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(14)),
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
                   Colors.transparent,
-                  Colors.black.withOpacity(0.45),
+                  Colors.black.withValues(alpha: 0.45),
                 ],
               ),
             ),
             child: const Center(
-              child: Text(
-                'Tap to change photo',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              child: Text('Tap to change photo',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600)),
             ),
           ),
         ),
@@ -647,19 +602,14 @@ class _EditFoodScreenState extends State<EditFoodScreen>
               size: 28, color: Color(0xFF2D6A4F)),
         ),
         const SizedBox(height: 12),
-        const Text(
-          'Add Photo',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF1B2E22),
-          ),
-        ),
+        const Text('Add Photo',
+            style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1B2E22))),
         const SizedBox(height: 4),
-        Text(
-          'Camera or Gallery',
-          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
-        ),
+        Text(kIsWeb ? 'Choose from Gallery' : 'Camera or Gallery',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
       ],
     );
   }
@@ -668,11 +618,10 @@ class _EditFoodScreenState extends State<EditFoodScreen>
     return Text(
       text,
       style: const TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        color: Color(0xFF1B2E22),
-        letterSpacing: 0.2,
-      ),
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF1B2E22),
+          letterSpacing: 0.2),
     );
   }
 
@@ -687,7 +636,7 @@ class _EditFoodScreenState extends State<EditFoodScreen>
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -698,18 +647,15 @@ class _EditFoodScreenState extends State<EditFoodScreen>
         style: const TextStyle(fontSize: 15, color: Color(0xFF1B2E22)),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle:
-              TextStyle(color: Colors.grey.shade400, fontSize: 15),
-          prefixIcon:
-              Icon(icon, color: const Color(0xFF2D6A4F), size: 20),
+          hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 15),
+          prefixIcon: Icon(icon, color: const Color(0xFF2D6A4F), size: 20),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
-          ),
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide.none),
           filled: true,
           fillColor: Colors.white,
-          contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16, vertical: 16),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         ),
       ),
     );
@@ -736,14 +682,13 @@ class _SourceTile extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
+              color: Colors.black.withValues(alpha: 0.04),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -755,7 +700,7 @@ class _SourceTile extends StatelessWidget {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
+                color: color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(icon, color: color, size: 22),
@@ -771,8 +716,7 @@ class _SourceTile extends StatelessWidget {
                         color: Color(0xFF1B2E22))),
                 const SizedBox(height: 2),
                 Text(subtitle,
-                    style: TextStyle(
-                        fontSize: 12, color: Colors.grey.shade500)),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
               ],
             ),
             const Spacer(),
@@ -821,23 +765,18 @@ class _DatePreviewChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: color, size: 14),
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: color,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12, color: color, fontWeight: FontWeight.w600)),
         ],
       ),
     );
