@@ -4,13 +4,9 @@
 |:-----------:|:---------------------------:|
 | 5025231202  | Lailatul Annisa Fitriana |
 
-## Firebase CRUD dan AUTH
+## Food Expiry Rreminder
 
-Berikut adalah hasil dari screenshoot CRUD dan AUTH.
-
-![CRUD](assets/CRUD.png)
-
-![AUTH](assets/AUTH.png)
+Link demo (https://drive.google.com/drive/folders/1KPB_6Ool2lWoIHBjoFaIvYylmyJLdBrR?usp=sharing)
 
 
 # flutter_application_6
